@@ -231,6 +231,17 @@
             <!-- ADD WORD MODE -->
             <div id="add-mode" class="mode-section active">
                 <h2>Add New Word</h2>
+                
+                <!-- Backup/Restore Section -->
+                <div style="background: #f8f9fa; padding: 15px; border-radius: 8px; margin-bottom: 20px;">
+                    <h3 style="margin-bottom: 10px; font-size: 1.1em;">💾 Backup & Restore</h3>
+                    <div style="display: flex; gap: 10px; flex-wrap: wrap;">
+                        <button class="btn" onclick="exportData()" style="background: #28a745;">📥 Download Backup</button>
+                        <input type="file" id="import-file" accept=".json" style="display: none;" onchange="importData(event)">
+                        <button class="btn" onclick="document.getElementById('import-file').click()" style="background: #fd7e14;">📤 Restore Backup</button>
+                        <button class="btn" onclick="clearAllData()" style="background: #dc3545;">🗑️ Clear All</button>
+                    </div>
+                </div>
                 <div class="input-group">
                     <label for="new-word">Word:</label>
                     <input type="text" id="new-word" placeholder="Enter word to learn">
@@ -316,6 +327,7 @@
         // Initialize App
         document.addEventListener('DOMContentLoaded', function() {
             loadWords();
+            loadAutoBackup(); // Try to restore from auto-backup if main storage is empty
             updateStats();
             registerServiceWorker();
         });
@@ -332,6 +344,7 @@
         // Storage Functions
         function saveWords() {
             localStorage.setItem('vocabularyWords', JSON.stringify(words));
+            autoBackup(); // Create auto-backup whenever we save
         }
 
         function loadWords() {
@@ -531,7 +544,117 @@
             document.getElementById('start-btn').textContent = 'Start New Session';
         }
 
-        // Utility Functions
+        // Backup/Restore Functions
+        function exportData() {
+            const data = {
+                words: words,
+                exportDate: new Date().toISOString(),
+                version: '1.0',
+                totalWords: words.length
+            };
+            
+            const blob = new Blob([JSON.stringify(data, null, 2)], { type: 'application/json' });
+            const url = URL.createObjectURL(blob);
+            const a = document.createElement('a');
+            a.href = url;
+            a.download = `vocabulary-backup-${new Date().toISOString().split('T')[0]}.json`;
+            document.body.appendChild(a);
+            a.click();
+            document.body.removeChild(a);
+            URL.revokeObjectURL(url);
+            
+            showMessage('add-message', `Backup downloaded! ${words.length} words saved.`, 'success');
+        }
+
+        function importData(event) {
+            const file = event.target.files[0];
+            if (!file) return;
+            
+            const reader = new FileReader();
+            reader.onload = function(e) {
+                try {
+                    const data = JSON.parse(e.target.result);
+                    
+                    if (!data.words || !Array.isArray(data.words)) {
+                        throw new Error('Invalid backup file format');
+                    }
+                    
+                    const importedWords = data.words;
+                    let newWords = 0;
+                    let updatedWords = 0;
+                    
+                    importedWords.forEach(importedWord => {
+                        const existingIndex = words.findIndex(w => w.word.toLowerCase() === importedWord.word.toLowerCase());
+                        
+                        if (existingIndex === -1) {
+                            // New word
+                            words.push({
+                                ...importedWord,
+                                id: Date.now() + Math.random() // Ensure unique ID
+                            });
+                            newWords++;
+                        } else {
+                            // Update existing word (keep best stats)
+                            const existing = words[existingIndex];
+                            words[existingIndex] = {
+                                ...importedWord,
+                                id: existing.id,
+                                studyCount: Math.max(existing.studyCount, importedWord.studyCount || 0),
+                                correctCount: Math.max(existing.correctCount, importedWord.correctCount || 0)
+                            };
+                            updatedWords++;
+                        }
+                    });
+                    
+                    saveWords();
+                    updateStats();
+                    showMessage('add-message', `Import successful! Added ${newWords} new words, updated ${updatedWords} existing words.`, 'success');
+                    
+                } catch (error) {
+                    showMessage('add-message', 'Error importing backup file. Please check the file format.', 'error');
+                }
+            };
+            reader.readAsText(file);
+            
+            // Reset file input
+            event.target.value = '';
+        }
+
+        function clearAllData() {
+            if (confirm(`Are you sure you want to delete ALL ${words.length} words? This cannot be undone!`)) {
+                if (confirm('Last chance! This will permanently delete your vocabulary. Continue?')) {
+                    words = [];
+                    saveWords();
+                    updateStats();
+                    showMessage('add-message', 'All data cleared.', 'success');
+                }
+            }
+        }
+
+        // Auto-backup feature (saves backup to localStorage as well)
+        function autoBackup() {
+            const backupData = {
+                words: words,
+                timestamp: Date.now()
+            };
+            localStorage.setItem('vocabularyBackup', JSON.stringify(backupData));
+        }
+
+        function loadAutoBackup() {
+            const backup = localStorage.getItem('vocabularyBackup');
+            if (backup && words.length === 0) {
+                try {
+                    const data = JSON.parse(backup);
+                    if (data.words && data.words.length > 0) {
+                        words = data.words;
+                        saveWords();
+                        console.log('Restored from auto-backup:', words.length, 'words');
+                    }
+                } catch (e) {
+                    console.log('Auto-backup restore failed');
+                }
+            }
+        }
         function updateStats() {
             document.getElementById('total-words').textContent = words.length;
             
